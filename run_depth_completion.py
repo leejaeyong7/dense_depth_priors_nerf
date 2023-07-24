@@ -10,7 +10,8 @@ from torch.utils.data import DataLoader, Subset
 from train_utils import MeanTracker
 import cv2
 
-from data import ScanNetDataset, convert_depth_completion_scaling_to_m, create_random_subsets
+from data.dataset_sampling import create_random_subsets
+from data.sparse_scannet_dataset import SparseScanNetDataset, convert_depth_completion_scaling_to_m
 from train_utils import print_network_info, get_hours_mins, MeanTracker, make_image_grid, apply_max_filter, \
     update_learning_rate
 from model import resnet18_skip
@@ -179,11 +180,12 @@ def train_depth_completion(args):
     tb = SummaryWriter(log_dir=os.path.join("runs", args.expname))
 
     # create datasets
-    train_dataset = ScanNetDataset(args.dataset_dir, "train", args.db_path, random_rot=args.random_rot, horizontal_flip=True, \
+    train_dataset = SparseScanNetDataset(args.dataset_dir, "train", random_rot=args.random_rot, horizontal_flip=True, \
         color_jitter=args.color_jitter, depth_noise=True, missing_depth_percent=args.missing_depth_percent)
-    val_dataset = ScanNetDataset(args.dataset_dir, "val", args.db_path, depth_noise=True, missing_depth_percent=args.missing_depth_percent)
+    val_dataset = SparseScanNetDataset(args.dataset_dir, "val", depth_noise=True, missing_depth_percent=args.missing_depth_percent)
     unnormalize = train_dataset.unnormalize
     train_loader = DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=6, drop_last=True)
+    # train_loader = DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=6, drop_last=True)
     args.i_val = min(args.i_val, len(train_loader))
     print("Train on {} samples".format(len(train_dataset)))
     validator = Validator(val_dataset, unnormalize, min_val_rmse, device)
@@ -250,8 +252,6 @@ def main():
     # data
     parser.add_argument("--dataset_dir", type=str, default="", \
         help="dataset directory")
-    parser.add_argument("--db_path", type=str, default="scannet_sift_database.db", \
-        help='path to the sift database')
     parser.add_argument("--pretrained_resnet_path", type=str, default="resnet18.pth", \
         help='path to the pretrained resnet weights')
     parser.add_argument("--ckpt_dir", type=str, default="", \
@@ -297,7 +297,7 @@ def main():
         os.makedirs(os.path.join(result_dir), exist_ok=True)
         
         # create dataset
-        test_dataset = ScanNetDataset(args.dataset_dir, "test", args.db_path, depth_noise=True, missing_depth_percent=args.missing_depth_percent)
+        test_dataset = SparseScanNetDataset(args.dataset_dir, "test", depth_noise=True, missing_depth_percent=args.missing_depth_percent)
         unnormalize = test_dataset.unnormalize
         test_loader = DataLoader(dataset=test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=6, drop_last=True)
         print("Test on {} samples".format(len(test_dataset)))
