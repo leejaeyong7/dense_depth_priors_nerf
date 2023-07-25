@@ -70,14 +70,14 @@ class SparseAffinity_Propagate(nn.Module):
         grep_kernel[7, 0, 5, 4] = 1
 
         spn_kernel = torch.zeros((8, 8, 11, 11))
-        grep_kernel[0, 0, 0, 5] = 1
-        grep_kernel[1, 1, 4, 5] = 1
-        grep_kernel[2, 2, 5, 10] = 1
-        grep_kernel[3, 3, 5, 6] = 1
-        grep_kernel[4, 4, 10, 5] = 1
-        grep_kernel[5, 5, 6, 5] = 1
-        grep_kernel[6, 6, 5, 0] = 1
-        grep_kernel[7, 7, 5, 4] = 1
+        spn_kernel[0, 0, 0, 5] = 1
+        spn_kernel[1, 1, 4, 5] = 1
+        spn_kernel[2, 2, 5, 10] = 1
+        spn_kernel[3, 3, 5, 6] = 1
+        spn_kernel[4, 4, 10, 5] = 1
+        spn_kernel[5, 5, 6, 5] = 1
+        spn_kernel[6, 6, 5, 0] = 1
+        spn_kernel[7, 7, 5, 4] = 1
         self.grep_kernel = nn.Parameter(grep_kernel, False)
         self.spn_kernel = nn.Parameter(spn_kernel, False)
 
