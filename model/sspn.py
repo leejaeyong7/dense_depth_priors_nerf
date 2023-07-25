@@ -9,7 +9,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
-from .cspn_affinity import Affinity_Propagate
+from .sspn_affinity import SparseAffinity_Propagate
 import torch.nn.functional as F
 
 # memory analyze
@@ -224,6 +224,30 @@ class Simple_Gudi_UpConv_Block_Last_Layer(nn.Module):
         out = self.conv1(x)
         return out
 
+class Sparse_Gudi_UpConv_Block_Last_Layer(nn.Module):
+    def __init__(self, in_channels, out_channels, oheight=0, owidth=0, bias=False):
+        super(Sparse_Gudi_UpConv_Block_Last_Layer, self).__init__()
+        assert out_channels == 8
+        self.conv_near = nn.Conv2d(in_channels, 4, kernel_size=3, stride=1, padding=1, bias=bias)
+        self.conv_far = nn.Conv2d(in_channels, 4, kernel_size=3, stride=1, padding=5, dilation=5, bias=bias)
+        self.oheight = oheight
+        self.owidth = owidth
+        self._up_pool = Unpool(in_channels)
+
+    def _up_pooling(self, x, scale):
+
+        x = self._up_pool(x)
+        if self.oheight != 0 and self.owidth != 0:
+            x = x.narrow(2, 0, self.oheight)
+            x = x.narrow(3, 0, self.owidth)
+        return x
+
+    def forward(self, x):
+        x = self._up_pooling(x, 2)
+        out_near = self.conv_near(x)
+        out_far = self.conv_far(x)
+        return torch.cat((out_near, out_far), 1)
+
 class Gudi_UpProj_Block(nn.Module):
     def __init__(self, in_channels, out_channels, oheight=0, owidth=0, bias=False):
         super(Gudi_UpProj_Block, self).__init__()
@@ -295,14 +319,14 @@ class Gudi_UpProj_Block_Cat(nn.Module):
         return out
 
 class ResNet(nn.Module):
-    def __init__(self, block, layers, up_proj_block, cspn_config=None, input_size=(240, 320)):
+    def __init__(self, block, layers, up_proj_block, sspn_config=None, input_size=(240, 320)):
         self.inplanes = 64
         iterations = 48
         std_iterations = 24
-        cspn_config_default = {'step': iterations, 'kernel': 3, 'norm_type': '8sum'}
-        if not (cspn_config is None):
-            cspn_config_default.update(cspn_config)
-        print(cspn_config_default)
+        sspn_config_default = {'step': iterations, 'kernel': 3, 'norm_type': '8sum'}
+        if not (sspn_config is None):
+            sspn_config_default.update(sspn_config)
+        print(sspn_config_default)
 
         super(ResNet, self).__init__()
         in_channels = 4
@@ -323,7 +347,7 @@ class ResNet(nn.Module):
         h_4, w_4 = h_2 // 2, w_2 // 2
         h_8, w_8 = h_4 // 2, w_4 // 2
         h_16, w_16 = h_8 // 2, w_8 // 2
-        self.post_process_layer = self._make_post_process_layer(cspn_config_default)
+        self.post_process_layer = self._make_post_process_layer(sspn_config_default)
 
         # depth branch
         self.gud_up_proj_layer1 = self._make_gud_up_conv_layer(Gudi_UpProj_Block, 512 * block.expansion, 256 * block.expansion, h_16, w_16)
@@ -331,7 +355,7 @@ class ResNet(nn.Module):
         self.gud_up_proj_layer3 = self._make_gud_up_conv_layer(Gudi_UpProj_Block_Cat, 128 * block.expansion, 64 * block.expansion, h_4, w_4)
         self.gud_up_proj_layer4 = self._make_gud_up_conv_layer(Gudi_UpProj_Block_Cat, 64 * block.expansion, 64, h_2, w_2)
         self.gud_up_proj_layer5 = self._make_gud_up_conv_layer(Simple_Gudi_UpConv_Block_Last_Layer, 64, 1, input_size[0], input_size[1])
-        self.gud_up_proj_layer6 = self._make_gud_up_conv_layer(Simple_Gudi_UpConv_Block_Last_Layer, 64, 8, input_size[0], input_size[1])
+        self.gud_up_proj_layer6 = self._make_gud_up_conv_layer(Sparse_Gudi_UpConv_Block_Last_Layer, 64, 8, input_size[0], input_size[1])
 
         # standard deviation branch
         self.gud_up_proj_layer1_std = self._make_gud_up_conv_layer(Gudi_UpProj_Block, 512 * block.expansion, 256 * block.expansion, h_16, w_16)
@@ -339,9 +363,9 @@ class ResNet(nn.Module):
         self.gud_up_proj_layer3_std = self._make_gud_up_conv_layer(Gudi_UpProj_Block_Cat, 128 * block.expansion, 64 * block.expansion, h_4, w_4)
         self.gud_up_proj_layer4_std = self._make_gud_up_conv_layer(Gudi_UpProj_Block_Cat, 64 * block.expansion, 64, h_2, w_2)
         self.gud_up_proj_layer5_std = self._make_gud_up_conv_layer(Simple_Gudi_UpConv_Block_Last_Layer, 64, 1, input_size[0], input_size[1])
-        self.gud_up_proj_layer6_std = self._make_gud_up_conv_layer(Simple_Gudi_UpConv_Block_Last_Layer, 64, 8, input_size[0], input_size[1])
-        cspn_config_std = {'step': std_iterations, 'kernel': 3, 'norm_type': '8sum_abs'}
-        self.post_process_layer_std = self._make_post_process_layer(cspn_config_std)
+        self.gud_up_proj_layer6_std = self._make_gud_up_conv_layer(Sparse_Gudi_UpConv_Block_Last_Layer, 64, 8, input_size[0], input_size[1])
+        sspn_config_std = {'step': std_iterations, 'kernel': 3, 'norm_type': '8sum_abs'}
+        self.post_process_layer_std = self._make_post_process_layer(sspn_config_std)
 
     def _make_layer(self, block, planes, blocks, stride=1):
         downsample = None
@@ -366,10 +390,10 @@ class ResNet(nn.Module):
     def _make_gud_up_conv_layer(self, up_proj_block, in_channels, out_channels, oheight, owidth, bias=False):
         return up_proj_block(in_channels, out_channels, oheight, owidth, bias)
 
-    def _make_post_process_layer(self, cspn_config=None):
-        return Affinity_Propagate(cspn_config['step'],
-                                  cspn_config['kernel'],
-                                  norm_type=cspn_config['norm_type'])
+    def _make_post_process_layer(self, sspn_config=None):
+        return SparseAffinity_Propagate(sspn_config['step'],
+                                        sspn_config['kernel'],
+                                        norm_type=sspn_config['norm_type'])
 
     def forward(self, x):
         [batch_size, channel, height, width] = x.size()

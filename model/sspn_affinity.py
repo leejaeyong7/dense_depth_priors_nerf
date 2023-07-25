@@ -6,13 +6,26 @@
 import torch.nn as nn
 import torch
 
-class Affinity_Propagate(nn.Module):
+class SparseAffinity_Propagate(nn.Module):
 
     def __init__(self,
                  prop_time,
                  prop_kernel,
                  norm_type='8sum'):
         """
+        Sparse Affinity propagation
+
+        x x x x x 1 x x x x x
+        x x x x x x x x x x x
+        x x x x x x x x x x x
+        x x x x x x x x x x x
+        x x x x x 2 x x x x x
+        7 x x x 8 C 4 x x x 3
+        x x x x x 6 x x x x x
+        x x x x x x x x x x x
+        x x x x x x x x x x x
+        x x x x x x x x x x x
+        x x x x x 5 x x x x x
 
         Inputs:
             prop_time: how many steps for CSPN to perform
@@ -22,7 +35,7 @@ class Affinity_Propagate(nn.Module):
                 '8sum_abs': normalization enforcing affinity to be positive
                             This will lead the center affinity to be 0
         """
-        super(Affinity_Propagate, self).__init__()
+        super(SparseAffinity_Propagate, self).__init__()
         self.prop_time = prop_time
         self.prop_kernel = prop_kernel
         assert prop_kernel == 3, 'this version only support 8 (3x3 - 1) neighborhood'
@@ -33,34 +46,46 @@ class Affinity_Propagate(nn.Module):
         self.in_feature = 1
         self.out_feature = 1
 
-        grep_kernel = torch.zeros((8, 1, 3, 3))
-        grep_kernel[0, 0, 0, 0] = 1
-        grep_kernel[1, 0, 0, 1] = 1
-        grep_kernel[2, 0, 0, 2] = 1
-        grep_kernel[3, 0, 1, 0] = 1
-        grep_kernel[4, 0, 1, 2] = 1
-        grep_kernel[5, 0, 2, 0] = 1
-        grep_kernel[6, 0, 2, 1] = 1
-        grep_kernel[7, 0, 2, 2] = 1
+        '''
+        x x x x x 0 x x x x x
+        x x x x x x x x x x x
+        x x x x x x x x x x x
+        x x x x x x x x x x x
+        x x x x x 1 x x x x x
+        6 x x x 7 C 3 x x x 2
+        x x x x x 5 x x x x x
+        x x x x x x x x x x x
+        x x x x x x x x x x x
+        x x x x x x x x x x x
+        x x x x x 4 x x x x x
+        '''
+        grep_kernel = torch.zeros((8, 1, 11, 11))
+        grep_kernel[0, 0, 0, 5] = 1
+        grep_kernel[1, 0, 4, 5] = 1
+        grep_kernel[2, 0, 5, 10] = 1
+        grep_kernel[3, 0, 5, 6] = 1
+        grep_kernel[4, 0, 10, 5] = 1
+        grep_kernel[5, 0, 6, 5] = 1
+        grep_kernel[6, 0, 5, 0] = 1
+        grep_kernel[7, 0, 5, 4] = 1
 
-        spn_kernel = torch.zeros((8, 8, 3, 3))
-        spn_kernel[0, 0, 0, 0] = 1
-        spn_kernel[1, 1, 0, 1] = 1
-        spn_kernel[2, 2, 0, 2] = 1
-        spn_kernel[3, 3, 1, 0] = 1
-        spn_kernel[4, 4, 1, 2] = 1
-        spn_kernel[5, 5, 2, 0] = 1
-        spn_kernel[6, 6, 2, 1] = 1
-        spn_kernel[7, 7, 2, 2] = 1
-
+        spn_kernel = torch.zeros((8, 8, 11, 11))
+        grep_kernel[0, 0, 0, 5] = 1
+        grep_kernel[1, 1, 4, 5] = 1
+        grep_kernel[2, 2, 5, 10] = 1
+        grep_kernel[3, 3, 5, 6] = 1
+        grep_kernel[4, 4, 10, 5] = 1
+        grep_kernel[5, 5, 6, 5] = 1
+        grep_kernel[6, 6, 5, 0] = 1
+        grep_kernel[7, 7, 5, 4] = 1
         self.grep_kernel = nn.Parameter(grep_kernel, False)
         self.spn_kernel = nn.Parameter(spn_kernel, False)
 
     def grep_conv(self, depth):
-        return torch.nn.functional.conv2d(depth, self.grep_kernel, bias=None, stride=1, padding=1, dilation=1)
+        return torch.nn.functional.conv2d(depth, self.grep_kernel, bias=None, stride=1, padding=5, dilation=1)
 
     def spn_conv(self, guidance):
-        return torch.nn.functional.conv2d(guidance, self.spn_kernel, bias=None, stride=1, padding=1, dilation=1)
+        return torch.nn.functional.conv2d(guidance, self.spn_kernel, bias=None, stride=1, padding=5, dilation=1)
 
     def forward(self, guidance, blur_depth, sparse_depth=None):
         '''
