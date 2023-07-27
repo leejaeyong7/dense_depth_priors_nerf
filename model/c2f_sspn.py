@@ -9,8 +9,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
-# from .cspn_affinity import Affinity_Propagate
-from .cspn_affinity_orig import Affinity_Propagate
+from .sspn_affinity import SparseAffinity_Propagate
 import torch.nn.functional as F
 
 # memory analyze
@@ -225,6 +224,30 @@ class Simple_Gudi_UpConv_Block_Last_Layer(nn.Module):
         out = self.conv1(x)
         return out
 
+class Sparse_Gudi_UpConv_Block_Last_Layer(nn.Module):
+    def __init__(self, in_channels, out_channels, oheight=0, owidth=0, bias=False):
+        super(Sparse_Gudi_UpConv_Block_Last_Layer, self).__init__()
+        assert out_channels == 8
+        self.conv_near = nn.Conv2d(in_channels, 4, kernel_size=3, stride=1, padding=1, bias=bias)
+        self.conv_far = nn.Conv2d(in_channels, 4, kernel_size=3, stride=1, padding=5, dilation=5, bias=bias)
+        self.oheight = oheight
+        self.owidth = owidth
+        self._up_pool = Unpool(in_channels)
+
+    def _up_pooling(self, x, scale):
+
+        x = self._up_pool(x)
+        if self.oheight != 0 and self.owidth != 0:
+            x = x.narrow(2, 0, self.oheight)
+            x = x.narrow(3, 0, self.owidth)
+        return x
+
+    def forward(self, x):
+        x = self._up_pooling(x, 2)
+        out_near = self.conv_near(x)
+        out_far = self.conv_far(x)
+        return torch.cat((out_near, out_far), 1)
+
 class Gudi_UpProj_Block(nn.Module):
     def __init__(self, in_channels, out_channels, oheight=0, owidth=0, bias=False):
         super(Gudi_UpProj_Block, self).__init__()
@@ -295,17 +318,18 @@ class Gudi_UpProj_Block_Cat(nn.Module):
         out = self.relu(out)
         return out
 
-class ResNet(nn.Module):
-    def __init__(self, block, layers, up_proj_block, cspn_config=None, input_size=(240, 320)):
+class C2FResNet(nn.Module):
+    def __init__(self, block, layers, up_proj_block, sspn_config=None, input_size=(240, 320)):
         self.inplanes = 64
-        iterations = 48
-        std_iterations = 24
-        cspn_config_default = {'step': iterations, 'kernel': 3, 'norm_type': '8sum'}
-        if not (cspn_config is None):
-            cspn_config_default.update(cspn_config)
-        print(cspn_config_default)
+        iterations = 8
+        updates = 4
+        sspn_config_default = {'step': iterations, 'kernel': 3, 'norm_type': '8sum'}
+        sspn_config_update = {'step': updates , 'kernel': 3, 'norm_type': '8sum'}
+        if not (sspn_config is None):
+            sspn_config_default.update(sspn_config)
+        print(sspn_config_default)
 
-        super(ResNet, self).__init__()
+        super(C2FResNet, self).__init__()
         in_channels = 4
         self.conv1_1 = nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
@@ -324,25 +348,40 @@ class ResNet(nn.Module):
         h_4, w_4 = h_2 // 2, w_2 // 2
         h_8, w_8 = h_4 // 2, w_4 // 2
         h_16, w_16 = h_8 // 2, w_8 // 2
-        self.post_process_layer = self._make_post_process_layer(cspn_config_default)
 
         # depth branch
         self.gud_up_proj_layer1 = self._make_gud_up_conv_layer(Gudi_UpProj_Block, 512 * block.expansion, 256 * block.expansion, h_16, w_16)
         self.gud_up_proj_layer2 = self._make_gud_up_conv_layer(Gudi_UpProj_Block_Cat, 256 * block.expansion, 128 * block.expansion, h_8, w_8)
         self.gud_up_proj_layer3 = self._make_gud_up_conv_layer(Gudi_UpProj_Block_Cat, 128 * block.expansion, 64 * block.expansion, h_4, w_4)
         self.gud_up_proj_layer4 = self._make_gud_up_conv_layer(Gudi_UpProj_Block_Cat, 64 * block.expansion, 64, h_2, w_2)
-        self.gud_up_proj_layer5 = self._make_gud_up_conv_layer(Simple_Gudi_UpConv_Block_Last_Layer, 64, 1, input_size[0], input_size[1])
-        self.gud_up_proj_layer6 = self._make_gud_up_conv_layer(Simple_Gudi_UpConv_Block_Last_Layer, 64, 8, input_size[0], input_size[1])
-
-        # standard deviation branch
         self.gud_up_proj_layer1_std = self._make_gud_up_conv_layer(Gudi_UpProj_Block, 512 * block.expansion, 256 * block.expansion, h_16, w_16)
         self.gud_up_proj_layer2_std = self._make_gud_up_conv_layer(Gudi_UpProj_Block_Cat, 256 * block.expansion, 128 * block.expansion, h_8, w_8)
         self.gud_up_proj_layer3_std = self._make_gud_up_conv_layer(Gudi_UpProj_Block_Cat, 128 * block.expansion, 64 * block.expansion, h_4, w_4)
         self.gud_up_proj_layer4_std = self._make_gud_up_conv_layer(Gudi_UpProj_Block_Cat, 64 * block.expansion, 64, h_2, w_2)
-        self.gud_up_proj_layer5_std = self._make_gud_up_conv_layer(Simple_Gudi_UpConv_Block_Last_Layer, 64, 1, input_size[0], input_size[1])
-        self.gud_up_proj_layer6_std = self._make_gud_up_conv_layer(Simple_Gudi_UpConv_Block_Last_Layer, 64, 8, input_size[0], input_size[1])
-        cspn_config_std = {'step': std_iterations, 'kernel': 3, 'norm_type': '8sum_abs'}
-        self.post_process_layer_std = self._make_post_process_layer(cspn_config_std)
+        # self.gud_up_proj_layer5 = self._make_gud_up_conv_layer(Simple_Gudi_UpConv_Block_Last_Layer, 64, 1, input_size[0], input_size[1])
+
+        self.depth_layer = self._make_gud_up_conv_layer(Simple_Gudi_UpConv_Block_Last_Layer, 256 * block.expansion, 1, h_8, w_8)
+        self.std_layer = self._make_gud_up_conv_layer(Simple_Gudi_UpConv_Block_Last_Layer, 256 * block.expansion, 1, h_8, w_8)
+
+        self.affinity_layer1 = self._make_gud_up_conv_layer(Sparse_Gudi_UpConv_Block_Last_Layer, 256 * block.expansion, 8, h_8, w_8)
+        self.affinity_layer2 = self._make_gud_up_conv_layer(Sparse_Gudi_UpConv_Block_Last_Layer, 128 * block.expansion, 8, h_4, w_4)
+        self.affinity_layer3 = self._make_gud_up_conv_layer(Sparse_Gudi_UpConv_Block_Last_Layer, 64 * block.expansion, 8, h_2, w_2)
+        self.affinity_layer4 = self._make_gud_up_conv_layer(Sparse_Gudi_UpConv_Block_Last_Layer, 64, 8, input_size[0], input_size[1])
+
+        self.affinity_std_layer1 = self._make_gud_up_conv_layer(Sparse_Gudi_UpConv_Block_Last_Layer, 256 * block.expansion, 8, h_8, w_8)
+        self.affinity_std_layer2 = self._make_gud_up_conv_layer(Sparse_Gudi_UpConv_Block_Last_Layer, 128 * block.expansion, 8, h_4, w_4)
+        self.affinity_std_layer3 = self._make_gud_up_conv_layer(Sparse_Gudi_UpConv_Block_Last_Layer, 64 * block.expansion, 8, h_2, w_2)
+        self.affinity_std_layer4 = self._make_gud_up_conv_layer(Sparse_Gudi_UpConv_Block_Last_Layer, 64, 8, input_size[0], input_size[1])
+
+        # standard deviation branch
+        # self.gud_up_proj_layer5_std = self._make_gud_up_conv_layer(Simple_Gudi_UpConv_Block_Last_Layer, 64, 1, input_size[0], input_size[1])
+        # self.gud_up_proj_layer6_std = self._make_gud_up_conv_layer(Sparse_Gudi_UpConv_Block_Last_Layer, 64, 8, input_size[0], input_size[1])
+        sspn_config_std = {'step': iterations, 'kernel': 3, 'norm_type': '8sum_abs'}
+        sspn_config_std_update = {'step': updates, 'kernel': 3, 'norm_type': '8sum_abs'}
+        self.sspn_iter_layer = self._make_post_process_layer(sspn_config_default)
+        self.sspn_iter_layer_std = self._make_post_process_layer(sspn_config_std)
+        self.sspn_update_layer = self._make_post_process_layer(sspn_config_update)
+        self.sspn_update_layer_std = self._make_post_process_layer(sspn_config_std_update)
 
     def _make_layer(self, block, planes, blocks, stride=1):
         downsample = None
@@ -367,14 +406,15 @@ class ResNet(nn.Module):
     def _make_gud_up_conv_layer(self, up_proj_block, in_channels, out_channels, oheight, owidth, bias=False):
         return up_proj_block(in_channels, out_channels, oheight, owidth, bias)
 
-    def _make_post_process_layer(self, cspn_config=None):
-        return Affinity_Propagate(cspn_config['step'],
-                                  cspn_config['kernel'],
-                                  norm_type=cspn_config['norm_type'])
+    def _make_post_process_layer(self, sspn_config=None):
+        return SparseAffinity_Propagate(sspn_config['step'],
+                                        sspn_config['kernel'],
+                                        norm_type=sspn_config['norm_type'])
 
     def forward(self, x):
         [batch_size, channel, height, width] = x.size()
         sparse_depth = x.narrow(1,channel - 1,1).clone()
+
         x = self.conv1_1(x)
         skip4 = x
 
@@ -390,78 +430,69 @@ class ResNet(nn.Module):
         x = self.layer3(x)
         x = self.layer4(x)
         x = self.bn2(self.conv2(x))
-        
-        std = self.gud_up_proj_layer1_std(x)
-        std = self.gud_up_proj_layer2_std(std, skip2)
-        std = self.gud_up_proj_layer3_std(std, skip3)
-        std = self.gud_up_proj_layer4_std(std, skip4)
-        guidance_std = self.gud_up_proj_layer6_std(std)
-        std = self.gud_up_proj_layer5_std(std)
-        std = F.softplus(self.post_process_layer_std(guidance_std, std), beta=20)
 
-        x = self.gud_up_proj_layer1(x)
-        x = self.gud_up_proj_layer2(x, skip2)
-        x = self.gud_up_proj_layer3(x, skip3)
-        x = self.gud_up_proj_layer4(x, skip4)
-        guidance = self.gud_up_proj_layer6(x)
-        x = self.gud_up_proj_layer5(x)
-        x = self.post_process_layer(guidance, x, sparse_depth)
 
-        return x, std
+        x_depth = self.gud_up_proj_layer1(x)
+        x_std = self.gud_up_proj_layer1_std(x)
+
+        # initial gudess
+        # 1/8
+        depth = self.depth_layer(x_depth)
+        std = self.std_layer(x_std)
+
+        # layer 1
+        # 1/8
+        aff = self.affinity_layer1(x_depth)
+        aff_std = self.affinity_std_layer1(x_std)
+        s_depth = F.adaptive_max_pool2d(sparse_depth, (depth.shape[-2:]))
+        depth = self.sspn_iter_layer(aff, depth, s_depth)
+        std = self.sspn_iter_layer_std(aff_std, std)
+        depth = F.upsample(depth, skip3.shape[-2:], mode='bilinear')
+        std = F.upsample(std, skip3.shape[-2:], mode='bilinear')
+
+        # layer 2
+        # 1/8
+        x_depth = self.gud_up_proj_layer2(x_depth, skip2)
+        x_std = self.gud_up_proj_layer2_std(x_std, skip2)
+        aff = self.affinity_layer2(x_depth)
+        aff_std = self.affinity_std_layer2(x_std)
+        s_depth = F.adaptive_max_pool2d(sparse_depth, (depth.shape[-2:]))
+        depth = self.sspn_update_layer(aff, depth, s_depth)
+        std = self.sspn_update_layer_std(aff_std, std)
+        depth = F.upsample(depth, skip4.shape[-2:], mode='bilinear')
+        std = F.upsample(std, skip4.shape[-2:], mode='bilinear')
+
+
+        # layer 3
+        x_depth = self.gud_up_proj_layer3(x_depth, skip3)
+        x_std = self.gud_up_proj_layer3_std(x_std, skip3)
+        aff = self.affinity_layer3(x_depth)
+        aff_std = self.affinity_std_layer3(x_std)
+        s_depth = F.adaptive_max_pool2d(sparse_depth, (depth.shape[-2:]))
+        depth = self.sspn_update_layer(aff, depth, s_depth)
+        std = self.sspn_update_layer_std(aff_std, std)
+        depth = F.upsample(depth, (height, width), mode='bilinear')
+        std = F.upsample(std, (height, width), mode='bilinear')
+
+        # final guess
+        x_depth = self.gud_up_proj_layer4(x_depth, skip4)
+        x_std = self.gud_up_proj_layer4_std(x_std, skip4)
+        aff = self.affinity_layer4(x_depth)
+        aff_std = self.affinity_std_layer4(x_std)
+        s_depth = F.adaptive_max_pool2d(sparse_depth, (depth.shape[-2:]))
+        depth = self.sspn_update_layer(aff, depth, s_depth)
+        std = self.sspn_update_layer_std(aff_std, std)
+        std = F.softplus(std, beta=20)
+        return depth, std
 
 def resnet18_skip(pretrained=False, pretrained_path='', map_location=None, **kwargs):
     """Constructs a ResNet-18 model.
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
-    model = ResNet(BasicBlock, [2, 2, 2, 2], UpProj_Block, **kwargs)
+    model = C2FResNet(BasicBlock, [2, 2, 2, 2], UpProj_Block, **kwargs)
     if pretrained:
         print('==> Load pretrained model..')
         pretrained_dict = torch.load(pretrained_path, map_location=map_location)
         model.load_state_dict(update_model(model, pretrained_dict))
-    return model
-
-def resnet34(pretrained=False, **kwargs):
-    """Constructs a ResNet-34 model.
-    Args:
-        pretrained (bool): If True, returns a model pre-trained on ImageNet
-    """
-    model = ResNet(BasicBlock, [3, 4, 6, 3], UpProj_Block, **kwargs)
-    if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['resnet34']))
-    return model
-
-
-def resnet50_skip(pretrained=False, checkpoint_dir='', **kwargs):
-    """Constructs a ResNet-50 model.
-    Args:
-        pretrained (bool): If True, returns a model pre-trained on ImageNet
-    """
-    model = ResNet(Bottleneck, [3, 4, 6, 3], UpProj_Block, **kwargs)
-    if pretrained:
-        print('==> Load pretrained model from ', model_path['resnet50'])
-        pretrained_dict = torch.load(os.path.join(checkpoint_dir, model_path['resnet50']))
-        model.load_state_dict(update_model(model, pretrained_dict))
-    return model
-
-
-def resnet101(pretrained=False, **kwargs):
-    """Constructs a ResNet-101 model.
-    Args:
-        pretrained (bool): If True, returns a model pre-trained on ImageNet
-    """
-    model = ResNet(Bottleneck, [3, 4, 23, 3], UpProj_Block, **kwargs)
-    if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['resnet101']))
-    return model
-
-
-def resnet152(pretrained=False, **kwargs):
-    """Constructs a ResNet-152 model.
-    Args:
-        pretrained (bool): If True, returns a model pre-trained on ImageNet
-    """
-    model = ResNet(Bottleneck, [3, 8, 36, 3], UpProj_Block, **kwargs)
-    if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['resnet152']))
     return model

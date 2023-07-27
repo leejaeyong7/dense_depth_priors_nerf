@@ -47,20 +47,35 @@ def read_depth(depth_file, s_depth_file):
     # 16bit integer range corresponds to range 0 .. 65.54m
     # use the first quarter of this range up to 16.38m and invalidate depth values beyond
     # scale depth, such that range 0 .. 1 corresponds to range 0 .. 16.38m
-    depth = depth / (1000 * 16.38375)
-    s_depth = s_depth / (16.38375)
+    max_depth = np.float32(2 ** 16 - 1) / 4.
+    depth = depth / max_depth
+    s_depth = (s_depth * 1000) / max_depth
+
+    # depth = depth / (1000 * 16.38375)
+    # s_depth = s_depth / (16.38375)
+
+
     invalidate_mask = depth > 1.
     depth[invalidate_mask] = 0.
     valid_depth[invalidate_mask] = False
     return transforms.functional.to_tensor(depth), torch.from_numpy(s_depth), transforms.functional.to_tensor(valid_depth)
 
+
 def convert_depth_completion_scaling_to_m(depth):
     # convert from depth completion scaling to meter, that means map range 0 .. 1 to range 0 .. 16,38m
-    return depth * (1000 * 16.38375)
+    return depth * (2 ** 16 - 1) / 4000.
 
 def convert_m_to_depth_completion_scaling(depth):
     # convert from meter to depth completion scaling, which maps range 0 .. 16,38m to range 0 .. 1
-    return depth / (1000 * 16.38375)
+    return depth * 4000. / (2 ** 16 - 1)
+
+# def convert_depth_completion_scaling_to_m(depth):
+#     # convert from depth completion scaling to meter, that means map range 0 .. 1 to range 0 .. 16,38m
+#     return depth * (1000 * 16.38375)
+
+# def convert_m_to_depth_completion_scaling(depth):
+#     # convert from meter to depth completion scaling, which maps range 0 .. 16,38m to range 0 .. 1
+#     return depth / (1000 * 16.38375)
 
 def get_normalize(mean, std):
     normalize = transforms.Normalize(mean=mean, std=std)

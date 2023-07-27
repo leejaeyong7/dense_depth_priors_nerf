@@ -14,7 +14,7 @@ from data.dataset_sampling import create_random_subsets
 from data.sparse_scannet_dataset import SparseScanNetDataset, convert_depth_completion_scaling_to_m
 from train_utils import print_network_info, get_hours_mins, MeanTracker, make_image_grid, apply_max_filter, \
     update_learning_rate
-from model.sspn import resnet18_skip
+from model.c2f_sspn import resnet18_skip
 from metric import compute_rmse
 
 def write_batch(batch, path):
