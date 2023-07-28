@@ -127,3 +127,10 @@ dmypy.json
 
 # ide
 .vscode/
+
+# misc
+runs/
+scenes
+*.tar
+*.pkl
+checkpoints/

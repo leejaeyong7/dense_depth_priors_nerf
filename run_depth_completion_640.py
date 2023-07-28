@@ -48,7 +48,7 @@ def load_net(args):
     else:
         load_pretrained = True
 
-    net = resnet18_skip(pretrained=load_pretrained, pretrained_path=args.pretrained_resnet_path)
+    net = resnet18_skip(pretrained=load_pretrained, pretrained_path=args.pretrained_resnet_path, input_size=(480, 640))
 
     print_network_info(net)
 
