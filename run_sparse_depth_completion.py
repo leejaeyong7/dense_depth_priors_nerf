@@ -207,13 +207,20 @@ def train_depth_completion(args):
                 continue
             input = data['rgbd'].to(device)
             target = data['target_depth'].to(device)
-            pred = net(input)
+            preds = net(input)
+            pred = preds[-1]
 
             # compute loss and metrics, update network parameters
             l1_loss = torch.nn.functional.l1_loss(pred[0][valid_target], target[valid_target])
+            final_train_loss = 0.01 * torch.nn.functional.gaussian_nll_loss(pred[0][valid_target], target[valid_target], pred[1][valid_target].pow(2))
             curr_train_metrics = {"l1" : convert_depth_completion_scaling_to_m(l1_loss.item()),}
-            train_loss = 0.01 * torch.nn.functional.gaussian_nll_loss(pred[0][valid_target], target[valid_target], pred[1][valid_target].pow(2))
             curr_train_metrics["gnll"] = train_loss.item()
+
+            # c2f loss
+            train_loss = 0
+            for pred in preds:
+                train_loss += 0.01 * torch.nn.functional.gaussian_nll_loss(pred[0][valid_target], target[valid_target], pred[1][valid_target].pow(2))
+
             optimizer.zero_grad()
             train_loss.backward()
             torch.nn.utils.clip_grad_value_(net.parameters(), 0.1)

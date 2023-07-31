@@ -444,6 +444,9 @@ class C2FResNet(nn.Module):
         depth = self.depth_layer(x_depth)
         std = self.std_layer(x_std)
 
+        depths = []
+        stds = []
+
         # layer 1
         # 1/8
         aff = self.affinity_layer1(x_depth)
@@ -453,6 +456,8 @@ class C2FResNet(nn.Module):
         std = self.sspn_iter_layer_std(aff_std, std)
         depth = F.upsample(depth, skip3.shape[-2:], mode='bilinear')
         std = F.upsample(std, skip3.shape[-2:], mode='bilinear')
+        depths.append(depth)
+        stds.append(std)
 
         # layer 2
         # 1/8
@@ -465,7 +470,8 @@ class C2FResNet(nn.Module):
         std = self.sspn_update_layer_std(aff_std, std)
         depth = F.upsample(depth, skip4.shape[-2:], mode='bilinear')
         std = F.upsample(std, skip4.shape[-2:], mode='bilinear')
-
+        depths.append(depth)
+        stds.append(std)
 
         # layer 3
         x_depth = self.gud_up_proj_layer3(x_depth, skip3)
@@ -477,6 +483,8 @@ class C2FResNet(nn.Module):
         std = self.sspn_update_layer_std(aff_std, std)
         depth = F.upsample(depth, (height, width), mode='bilinear')
         std = F.upsample(std, (height, width), mode='bilinear')
+        depths.append(depth)
+        stds.append(std)
 
         # final guess
         x_depth = self.gud_up_proj_layer4(x_depth, skip4)
@@ -487,7 +495,12 @@ class C2FResNet(nn.Module):
         depth = self.sspn_update_layer(aff, depth, s_depth)
         std = self.sspn_update_layer_std(aff_std, std)
         std = F.softplus(std, beta=20)
-        return depth, std
+        depths.append(depth)
+        stds.append(std)
+        if self.training:
+            return depths, stds
+        else:
+            return depth, std
 
 def resnet18_skip(pretrained=False, pretrained_path='', map_location=None, **kwargs):
     """Constructs a ResNet-18 model.
