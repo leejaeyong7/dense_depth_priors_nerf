@@ -321,8 +321,12 @@ class Gudi_UpProj_Block_Cat(nn.Module):
 class C2FResNet(nn.Module):
     def __init__(self, block, layers, up_proj_block, sspn_config=None, input_size=(240, 320)):
         self.inplanes = 64
-        iterations = 8
-        updates = 4
+        # iterations = 8
+        # updates = 4
+        iterations = 24
+        updates = 8
+        std_iterations = 12
+        std_updates = 4
         sspn_config_default = {'step': iterations, 'kernel': 3, 'norm_type': '8sum'}
         sspn_config_update = {'step': updates , 'kernel': 3, 'norm_type': '8sum'}
         if not (sspn_config is None):
@@ -376,8 +380,8 @@ class C2FResNet(nn.Module):
         # standard deviation branch
         # self.gud_up_proj_layer5_std = self._make_gud_up_conv_layer(Simple_Gudi_UpConv_Block_Last_Layer, 64, 1, input_size[0], input_size[1])
         # self.gud_up_proj_layer6_std = self._make_gud_up_conv_layer(Sparse_Gudi_UpConv_Block_Last_Layer, 64, 8, input_size[0], input_size[1])
-        sspn_config_std = {'step': iterations, 'kernel': 3, 'norm_type': '8sum_abs'}
-        sspn_config_std_update = {'step': updates, 'kernel': 3, 'norm_type': '8sum_abs'}
+        sspn_config_std = {'step': std_iterations, 'kernel': 3, 'norm_type': '8sum_abs'}
+        sspn_config_std_update = {'step': std_updates, 'kernel': 3, 'norm_type': '8sum_abs'}
         self.sspn_iter_layer = self._make_post_process_layer(sspn_config_default)
         self.sspn_iter_layer_std = self._make_post_process_layer(sspn_config_std)
         self.sspn_update_layer = self._make_post_process_layer(sspn_config_update)
