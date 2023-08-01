@@ -16,6 +16,7 @@ from train_utils import print_network_info, get_hours_mins, MeanTracker, make_im
     update_learning_rate
 from model.c2f_sspn import resnet18_skip
 from metric import compute_rmse
+import torch.nn.functional as F
 
 def write_batch(batch, path):
     bgr = cv2.cvtColor((batch.permute(1, 2, 0).numpy() * 255.).astype(np.uint8), cv2.COLOR_RGB2BGR)
@@ -207,19 +208,22 @@ def train_depth_completion(args):
                 continue
             input = data['rgbd'].to(device)
             target = data['target_depth'].to(device)
-            preds = net(input)
-            pred = preds[-1]
+            depths, stds = net(input)
+            pred = (depths[-1], stds[-1])
 
             # compute loss and metrics, update network parameters
             l1_loss = torch.nn.functional.l1_loss(pred[0][valid_target], target[valid_target])
             final_train_loss = 0.01 * torch.nn.functional.gaussian_nll_loss(pred[0][valid_target], target[valid_target], pred[1][valid_target].pow(2))
             curr_train_metrics = {"l1" : convert_depth_completion_scaling_to_m(l1_loss.item()),}
-            curr_train_metrics["gnll"] = train_loss.item()
+            curr_train_metrics["gnll"] = final_train_loss.item()
 
             # c2f loss
             train_loss = 0
-            for pred in preds:
-                train_loss += 0.01 * torch.nn.functional.gaussian_nll_loss(pred[0][valid_target], target[valid_target], pred[1][valid_target].pow(2))
+            for depth, std in zip(depths, stds):
+                vt = F.adaptive_max_pool2d(valid_target.float(), (depth.shape[-2:])).bool()
+                targ = F.adaptive_max_pool2d(target.float(), (depth.shape[-2:]))
+                train_loss += 0.01 * torch.nn.functional.gaussian_nll_loss(depth[vt], targ[vt], std[vt].pow(2))
+
 
             optimizer.zero_grad()
             train_loss.backward()
