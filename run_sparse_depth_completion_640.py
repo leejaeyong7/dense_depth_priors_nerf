@@ -221,8 +221,8 @@ def train_depth_completion(args):
             # c2f loss
             train_loss = 0
             for depth, std in zip(depths, stds):
-                vt = F.adaptive_max_pool2d(valid_target.float(), (depth.shape[-2:])).bool()
-                targ = F.adaptive_max_pool2d(target.float(), (depth.shape[-2:]))
+                vt = (1 - F.adaptive_max_pool2d((1 - valid_target).float(), (depth.shape[-2:]))).bool()
+                targ = F.interpolate(target.float(), (depth.shape[-2:]), mode='bilinear')
                 train_loss += 0.01 * torch.nn.functional.gaussian_nll_loss(depth[vt], targ[vt], std[vt].pow(2))
 
             optimizer.zero_grad()
